@@ -44,6 +44,7 @@ def convert(size, box):
 
 class LabelTool:
     def __init__(self, master):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_PATH
         # set up the main frame
         self.parent = master
         self.parent.title("LabelTool")
@@ -232,6 +233,8 @@ class LabelTool:
                 f.write(" ".join(map(str, yolobbox)) + "\n")
         print(f"Image {self.cur}'s box saved")
 
+        self.saveYoloBboxFirebase()
+
     def mouseClick(self, event):
         if self.STATE["click"] == 0:
             self.STATE["x"], self.STATE["y"] = event.x, event.y
@@ -374,6 +377,7 @@ class LabelTool:
         sightings_ref = db.collection("sightings")
 
         image_count = 0
+        sightings_count = 0
 
         query_date_from = self.get_date()
         query = sightings_ref.where(filter=firestore.FieldFilter("date", ">=", query_date_from))
@@ -389,6 +393,7 @@ class LabelTool:
         for doc in sightings_docs:
             doc_data = doc.to_dict()
             sighting_id = doc_data.get("sighting_id")
+            sightings_count += 1
             try:
                 doc_data = doc.to_dict()
                 sighting_id = doc_data.get("sighting_id")
@@ -408,6 +413,7 @@ class LabelTool:
             except Exception as e:
                 print(f"Error downloading images for sighting {sighting_id}, {e}")
                 continue
+        return image_count, sightings_count
 
     def downloadImages(self):
         if not os.path.exists(self.outDir):
@@ -427,13 +433,15 @@ class LabelTool:
         loading_popup.update_idletasks()
 
         # Download then decrypt
-        self.gcp_query_download()
+        image_count, sightings_count = self.gcp_query_download()
         self.decrypt_images()
 
         loading_popup.destroy()
-        messagebox.showinfo("Success", "Images downloaded successfully!")
+        messagebox.showinfo(f"Success", f"{image_count} images downloaded from {sightings_count} sightings")
 
-
+    def saveYoloBboxFirebase(self):
+        # set over existing yolo bbox metadata on sighting_id
+        pass
 
 
 if __name__ == "__main__":
