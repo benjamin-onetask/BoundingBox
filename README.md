@@ -1,3 +1,13 @@
+BT 2024-02-26
+
+1. Requires service_account.json 
+2. Set up dirs in config.py
+
+
+
+
+
+__________________________________________________________
 BBox-Label-Tool
 ===============
 

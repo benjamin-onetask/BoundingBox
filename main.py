@@ -8,13 +8,13 @@
 # -------------------------------------------------------------------------------
 # from __future__ import division
 from tkinter import *
+from tkinter import messagebox
 from PIL import Image, ImageTk
 import os
 import glob
-from google.cloud import firestore
-from google.cloud import storage
+from firebase_admin import credentials, initialize_app, firestore, storage
 from datetime import datetime, timedelta
-from configs import BUCKET_NAME, IMAGE_DIR, LABELS, DAYS_BACK, OUT_DIR, QUERY_THRESHOLD, YOLO_OUT_DIR
+from configs import BUCKET_NAME, CREDENTIALS_PATH, ENCRYPTED_IMAGE_DIR, IMAGE_DIR, LABELS, DAYS_BACK, OUT_DIR, QUERY_THRESHOLD, YOLO_OUT_DIR
 # colors for the bboxes
 COLORS = ["red", "blue", "cyan", "green", "black"]
 
@@ -52,6 +52,7 @@ class LabelTool:
         self.parent.resizable(width=FALSE, height=FALSE)
 
         # initialize global state
+        self.encryptedDir = os.path.join(ENCRYPTED_IMAGE_DIR)
         self.imageDir = os.path.join(IMAGE_DIR)
         self.imageList = []
         self.outDir = os.path.join(OUT_DIR)
@@ -142,16 +143,6 @@ class LabelTool:
         self.idxEntry.pack(side=LEFT)
         self.goBtn = Button(self.ctrPanel, text="Go", command=self.gotoImage)
         self.goBtn.pack(side=LEFT)
-
-        # # example pannel for illustration
-        # self.egPanel = Frame(self.frame, border = 10)
-        # self.egPanel.grid(row = 1, column = 0, rowspan = 5, sticky = N)
-        # self.tmpLabel2 = Label(self.egPanel, text = "Examples:")
-        # self.tmpLabel2.pack(side = TOP, pady = 5)
-        # self.egLabels = []
-        # for i in range(3):
-        #     self.egLabels.append(Label(self.egPanel))
-        #     self.egLabels[-1].pack(side = TOP)
 
         # display mouse position
         self.disp = Label(self.ctrPanel, text="")
@@ -352,36 +343,34 @@ class LabelTool:
         formatted_date = target_date.strftime('%Y-%m-%d')
         return formatted_date
 
-    def downloadImages(self):
-        if not os.path.exists(self.outDir):
-            os.mkdir(self.outDir)
+    def decrypt_images(self):
+        # For all images in the ENCRYPTED_IMAGE_DIR run decrypt
 
-        loading_popup = Tk()
-        loading_popup.geometry("200x100")
-        loading_popup.title("Downloading Images...")
-
-        progress_label = Label(loading_popup, text="Downloading...")
-        progress_label.pack()
-
-        loading_popup.update_idletasks()
+        # Then delete the original encrypted image
+        pass
 
     def download_helper(self, bucket, image_filename):
-        image_local_path = os.path.join(IMAGE_DIR, image_filename)
+        image_local_path = os.path.join(ENCRYPTED_IMAGE_DIR, image_filename)
 
         if os.path.exists(image_local_path):
             print(f"{image_local_path} already exists")
             return True
-        blob = storage.Blob(image_filename, bucket)
+
+        blob = bucket.blob(image_filename)
 
         if blob.exists():
+            print(image_local_path)
             blob.download_to_filename(image_local_path)
             return True
         return False
 
     def gcp_query_download(self):
+
+        cred = credentials.Certificate(CREDENTIALS_PATH)
+        initialize_app(cred)
+
         db = firestore.Client()
-        storage_client = storage.Client()
-        bucket = storage_client.get_bucket(BUCKET_NAME)
+        bucket = storage.bucket(BUCKET_NAME)
         sightings_ref = db.collection("sightings")
 
         image_count = 0
@@ -398,6 +387,8 @@ class LabelTool:
         sightings_docs = query.get()
 
         for doc in sightings_docs:
+            doc_data = doc.to_dict()
+            sighting_id = doc_data.get("sighting_id")
             try:
                 doc_data = doc.to_dict()
                 sighting_id = doc_data.get("sighting_id")
@@ -410,11 +401,40 @@ class LabelTool:
                 # lp_image_name = f"{sighting_id}_{taken_on}_{date}_{time}_LP.jpg"
 
                 self.download_helper(bucket, face_image_name)
+                image_count += 1
                 self.download_helper(bucket, wscr_image_name)
+                image_count += 1
 
             except Exception as e:
                 print(f"Error downloading images for sighting {sighting_id}, {e}")
                 continue
+
+    def downloadImages(self):
+        if not os.path.exists(self.outDir):
+            os.mkdir(self.outDir)
+        if not os.path.exists(self.encryptedDir):
+            os.mkdir(self.encryptedDir)
+        if not os.path.exists(self.imageDir):
+            os.mkdir(self.imageDir)
+
+        loading_popup = Tk()
+        loading_popup.geometry("200x100")
+        loading_popup.title("Downloading Images...")
+
+        progress_label = Label(loading_popup, text="Downloading...")
+        progress_label.pack()
+
+        loading_popup.update_idletasks()
+
+        # Download then decrypt
+        self.gcp_query_download()
+        self.decrypt_images()
+
+        loading_popup.destroy()
+        messagebox.showinfo("Success", "Images downloaded successfully!")
+
+
+
 
 if __name__ == "__main__":
     root = Tk()
