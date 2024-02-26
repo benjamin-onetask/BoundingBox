@@ -7,63 +7,45 @@
 #
 #-------------------------------------------------------------------------------
 from __future__ import division
-from Tkinter import *
-import tkMessageBox
+from tkinter import *
+import tkinter.messagebox
 from PIL import Image, ImageTk
 import os
 import glob
 import random
 
 # colors for the bboxes
-Extension = '.jpg'
-COLORS = ['red', 'blue', 'yellow', 'pink', 'cyan', 'green', 'black']
+Extension = '.JPEG'
+COLORS = ['red', 'blue', 'cyan', 'green', 'black']
 labels = {
-0 : 'speed limit 20 (prohibitory)',
-1 : 'speed limit 30 (prohibitory)',
-2 : 'speed limit 50 (prohibitory)',
-3 : 'speed limit 60 (prohibitory)',
-4 : 'speed limit 70 (prohibitory)',
-5 : 'speed limit 80 (prohibitory)',
-6 : 'restriction ends 80 (other)',
-7 : 'speed limit 100 (prohibitory)',
-8 : 'speed limit 120 (prohibitory)',
-9 : 'no overtaking (prohibitory)',
-10 : 'no overtaking (trucks) (prohibitory)',
-11 : 'priority at next intersection (danger)',
-12 : 'priority road (other)',
-13 : 'give way (other)',
-14 : 'stop (other)',
-15 : 'no traffic both ways (prohibitory)',
-16 : 'no trucks (prohibitory)',
-17 : 'no entry (other)',
-18 : 'danger (danger)',
-19 : 'bend left (danger)',
-20 : 'bend right (danger)',
-21 : 'bend (danger)',
-22 : 'uneven road (danger)',
-23 : 'slippery road (danger)',
-24 : 'road narrows (danger)',
-25 : 'construction (danger)',
-26 : 'traffic signal (danger)',
-27 : 'pedestrian crossing (danger)',
-28 : 'school crossing (danger)',
-29 : 'cycles crossing (danger)',
-30 : 'snow (danger)',
-31 : 'animals (danger)',
-32 : 'restriction ends (other)',
-33 : 'go right (mandatory)',
-34 : 'go left (mandatory)',
-35 : 'go straight (mandatory)',
-36 : 'go right or straight (mandatory)',
-37 : 'go left or straight (mandatory)',
-38 : 'keep right (mandatory)',
-39 : 'keep left (mandatory)',
-40 : 'roundabout (mandatory)',
-41 : 'restriction ends (overtaking) (other)',
-42 : 'restriction ends (overtaking (trucks)) (other)'
+0 : 'phone',
+1 : 'seatbelt',
+2 : 'passengerbelt',
 }
-# image sizes for the examples
-SIZE = 256, 256
+
+
+def convert(size, box):
+    image_width = size[0]
+    image_height = size[1]
+    # Unpack the bounding box coordinates
+    cls, x_min, y_min, x_max, y_max = box
+
+    # Calculate the center coordinates of the bounding box
+    x_center = (x_min + x_max) / 2
+    y_center = (y_min + y_max) / 2
+
+    # Calculate the width and height of the bounding box
+    width = x_max - x_min
+    height = y_max - y_min
+
+    # Normalize the coordinates and dimensions
+    x_center /= image_width
+    y_center /= image_height
+    width /= image_width
+    height /= image_height
+
+    return (cls, x_center, y_center, width, height)
+
 
 class LabelTool():
     def __init__(self, master):
@@ -80,6 +62,7 @@ class LabelTool():
         self.egDir = ''
         self.egList = []
         self.outDir = ''
+        self.yoloOutDir = ''
         self.cur = 0
         self.total = 0
         self.category = 0
@@ -96,6 +79,7 @@ class LabelTool():
         self.bboxIdList = []
         self.bboxId = None
         self.bboxList = []
+        self.yoloBoxList = []
         self.hl = None
         self.vl = None
 
@@ -154,15 +138,15 @@ class LabelTool():
         self.goBtn = Button(self.ctrPanel, text = 'Go', command = self.gotoImage)
         self.goBtn.pack(side = LEFT)
 
-        # example pannel for illustration
-        self.egPanel = Frame(self.frame, border = 10)
-        self.egPanel.grid(row = 1, column = 0, rowspan = 5, sticky = N)
-        self.tmpLabel2 = Label(self.egPanel, text = "Examples:")
-        self.tmpLabel2.pack(side = TOP, pady = 5)
-        self.egLabels = []
-        for i in range(3):
-            self.egLabels.append(Label(self.egPanel))
-            self.egLabels[-1].pack(side = TOP)
+        # # example pannel for illustration
+        # self.egPanel = Frame(self.frame, border = 10)
+        # self.egPanel.grid(row = 1, column = 0, rowspan = 5, sticky = N)
+        # self.tmpLabel2 = Label(self.egPanel, text = "Examples:")
+        # self.tmpLabel2.pack(side = TOP, pady = 5)
+        # self.egLabels = []
+        # for i in range(3):
+        #     self.egLabels.append(Label(self.egPanel))
+        #     self.egLabels[-1].pack(side = TOP)
 
         # display mouse position
         self.disp = Label(self.ctrPanel, text='')
@@ -171,60 +155,37 @@ class LabelTool():
         self.frame.columnconfigure(1, weight = 1)
         self.frame.rowconfigure(4, weight = 1)
 
-    def loadDir(self, dbg = False):
-        if not dbg:
-            s = self.entry.get()
-            self.parent.focus()
-            self.category = int(s)
-        else:
-            s = r'D:\workspace\python\labelGUI'
+    def loadDir(self):
         # get image list
-        self.imageDir = os.path.join(r'./Images', '%03d' %(self.category))
-        #print self.imageDir
-        self.imageList = glob.glob(os.path.join(self.imageDir, '*'+Extension))
+        self.imageDir = os.path.join('./Images')
+        self.imageList = glob.glob(os.path.join(self.imageDir, '*'))
         #print self.imageList 
         if len(self.imageList) == 0:
-            print 'No ',Extension,' images found in the specified dir!'
+            print ('No images found in the specified dir!')
             return
 
         # default to the 1st image in the collection
         self.cur = 1
         self.total = len(self.imageList)
 
-         # set up output dir
-        self.outDir = os.path.join(r'./Labels', '%03d' %(self.category))
+        # set up output dir
+        self.outDir = os.path.join('./Labels')
         if not os.path.exists(self.outDir):
             os.mkdir(self.outDir)
 
-        # load example bboxes
-        self.egDir = os.path.join(r'./Examples', '%03d' %(self.category))
-        if not os.path.exists(self.egDir):
-            print "exiting, no examples"
-            return
-        filelist = glob.glob(os.path.join(self.egDir, '*'+Extension))
-        self.tmp = []
-        self.egList = []
-        random.shuffle(filelist)
-        print("execution reached")
-        for (i, f) in enumerate(filelist):
-            if i == 3:
-                break
-            im = Image.open(f)
-            print "opened ",im
-            r = min(SIZE[0] / im.size[0], SIZE[1] / im.size[1])
-            new_size = int(r * im.size[0]), int(r * im.size[1])
-            self.tmp.append(im.resize(new_size, Image.ANTIALIAS))
-            self.egList.append(ImageTk.PhotoImage(self.tmp[-1]))
-            self.egLabels[i].config(image = self.egList[-1], width = SIZE[0], height = SIZE[1])
+        self.yoloOutDir = os.path.join('./YoloLabels')
+        if not os.path.exists(self.yoloOutDir):
+            os.mkdir(self.yoloOutDir)
 
         self.loadImage()
-        print '%d images loaded from %s' %(self.total, s)
+        print(f"{self.total} images loaded from {self.imageDir}")
 
     def loadImage(self):
         # load image
         imagepath = self.imageList[self.cur - 1]
         self.img = Image.open(imagepath)
         self.tkimg = ImageTk.PhotoImage(self.img)
+        self.imgsize = self.img.size
         self.mainPanel.config(width = max(self.tkimg.width(), 400), height = max(self.tkimg.height(), 400))
         self.mainPanel.create_image(0, 0, image = self.tkimg, anchor=NW)
         self.progLabel.config(text = "%04d/%04d" %(self.cur, self.total))
@@ -233,45 +194,36 @@ class LabelTool():
         self.clearBBox()
         self.imagename = os.path.split(imagepath)[-1].split('.')[0]
         labelname = self.imagename + '.txt'
-        #print "imagename is ",self.imagename
-        #print "labelname is", labelname
         self.labelfilename = os.path.join(self.outDir, labelname)
-        bbox_cnt = 0
+        # Need to figure out how I want yolo labels
+        self.yololabelfilename = os.path.join(self.yoloOutDir, labelname)
+
         if os.path.exists(self.labelfilename):
             with open(self.labelfilename) as f:
                 for (i, line) in enumerate(f):
-                    if i == 0:
-                        bbox_cnt = int(line.strip())
-                        continue
                     tmp = [int(t.strip()) for t in line.split()]
-##                    print tmp
                     self.bboxList.append(tuple(tmp))
-                    tmpId = self.mainPanel.create_rectangle(tmp[0], tmp[1], \
-                                                            tmp[2], tmp[3], \
+                    self.yoloBoxList.append(convert(self.imgsize, tmp))
+
+                    tmpId = self.mainPanel.create_rectangle(tmp[1], tmp[2], \
+                                                            tmp[3], tmp[4], \
                                                             width = 2, \
                                                             outline = COLORS[(len(self.bboxList)-1) % len(COLORS)])
+                    selection = self.get_label_value(tmp[0])
                     self.bboxIdList.append(tmpId)
-                    self.listbox.insert(END, '(%d, %d) -> (%d, %d)' %(tmp[0], tmp[1], tmp[2], tmp[3]))
+                    self.listbox.insert(END, '%s : (%d, %d) -> (%d, %d)' %(selection, tmp[1], tmp[2], tmp[3], tmp[4]))
                     self.listbox.itemconfig(len(self.bboxIdList) - 1, fg = COLORS[(len(self.bboxIdList) - 1) % len(COLORS)])
+        # print(self.bboxList)
+        # print(self.yoloBoxList)
 
     def saveImage(self):
         with open(self.labelfilename, 'w') as f:
             for bbox in self.bboxList:
                 f.write(' '.join(map(str, bbox)) + '\n')
-        #Save the current image in the new flder as well
-        self.imagefilename = os.path.join(self.outDir, self.imagename)
-        print 'original file name is ', self.imagename
-        print 'new file name is ',self.imagefilename
-        with open(self.imagefilename + Extension, 'w') as f:
-            self.img.save(f)
-        #Delete file
-        try:
-            remove_name = os.path.join(self.imageDir, self.imagename + Extension)
-            os.remove(remove_name)
-        except:
-            print 'please skip'
-        print 'Image No. %d saved' %(self.cur)
-
+        with open(self.yololabelfilename, 'w') as f:
+            for yolobbox in self.yoloBoxList:
+                f.write(' '.join(map(str, yolobbox)) + '\n')
+        print(f"Image {self.cur}'s box saved")
 
     def mouseClick(self, event):
         if self.STATE['click'] == 0:
@@ -282,6 +234,7 @@ class LabelTool():
             selection = self.listboxOption.get(self.listboxOption.curselection())
             self.bboxList.append((self.get_index(selection), x1, y1, x2, y2))
             self.bboxIdList.append(self.bboxId)
+            print(self.bboxList)
             self.bboxId = None
             self.listbox.insert(END, '%s : (%d, %d) -> (%d, %d)' %(selection, x1, y1, x2, y2 ))
             self.listbox.itemconfig(len(self.bboxIdList) - 1, fg = COLORS[(len(self.bboxIdList) - 1) % len(COLORS)])
@@ -327,6 +280,7 @@ class LabelTool():
         self.listbox.delete(0, len(self.bboxList))
         self.bboxIdList = []
         self.bboxList = []
+        self.yoloBoxList = []
 
     def prevImage(self, event = None):
         if self.cur > 1:
@@ -355,6 +309,12 @@ class LabelTool():
         for key,label in labels.items():
             if value == label:
                 return key
+
+    def get_label_value(self, index):
+        try:
+            return labels[index]
+        except:
+            return None
 
 
 if __name__ == '__main__':
