@@ -6,20 +6,17 @@
 
 #
 # -------------------------------------------------------------------------------
-from __future__ import division
+# from __future__ import division
 from tkinter import *
 from PIL import Image, ImageTk
 import os
 import glob
-
+from google.cloud import firestore
+from google.cloud import storage
+from datetime import datetime, timedelta
+from configs import BUCKET_NAME, IMAGE_DIR, LABELS, DAYS_BACK, OUT_DIR, QUERY_THRESHOLD, YOLO_OUT_DIR
 # colors for the bboxes
-Extension = ".JPEG"
 COLORS = ["red", "blue", "cyan", "green", "black"]
-labels = {
-    0: "phone",
-    1: "seatbelt",
-    2: "passengerbelt",
-}
 
 
 def convert(size, box):
@@ -55,12 +52,10 @@ class LabelTool:
         self.parent.resizable(width=FALSE, height=FALSE)
 
         # initialize global state
-        self.imageDir = ""
+        self.imageDir = os.path.join(IMAGE_DIR)
         self.imageList = []
-        self.egDir = ""
-        self.egList = []
-        self.outDir = ""
-        self.yoloOutDir = ""
+        self.outDir = os.path.join(OUT_DIR)
+        self.yoloOutDir = os.path.join(YOLO_OUT_DIR)
         self.cur = 0
         self.total = 0
         self.category = 0
@@ -83,10 +78,14 @@ class LabelTool:
 
         # ----------------- GUI stuff ---------------------
         # dir entry & load
-        self.label = Label(self.frame, text="Image Dir:")
-        self.label.grid(row=0, column=0, sticky=E)
-        self.entry = Entry(self.frame)
-        self.entry.grid(row=0, column=1, sticky=W + E)
+        # self.label = Label(self.frame, text="Image Dir:")
+        # self.label.grid(row=0, column=0, sticky=E)
+        # self.entry = Entry(self.frame)
+        # self.entry.grid(row=0, column=1, sticky=W + E)
+
+        self.dldBtn = Button(self.frame, text="Download", command=self.downloadImages)
+        self.dldBtn.grid(row=0, column=1, sticky=E)
+
         self.ldBtn = Button(self.frame, text="Load", command=self.loadDir)
         self.ldBtn.grid(row=0, column=2, sticky=W + E)
 
@@ -113,7 +112,7 @@ class LabelTool:
         self.btnClear.grid(row=5, column=2, sticky=W + E + N)
         # Getting the labels on display
         self.listboxOption = Listbox(self.frame, width=22, height=32)
-        [self.listboxOption.insert(x, y) for x, y in labels.items()]
+        [self.listboxOption.insert(x, y) for x, y in LABELS.items()]
         self.listboxOption.grid(row=6, column=2, sticky=N)
 
         # control panel for image navigation
@@ -163,7 +162,7 @@ class LabelTool:
 
     def loadDir(self):
         # get image list
-        self.imageDir = os.path.join("./Images")
+        self.imageDir = os.path.join(IMAGE_DIR)
         self.imageList = glob.glob(os.path.join(self.imageDir, "*"))
         # print self.imageList
         if len(self.imageList) == 0:
@@ -175,11 +174,9 @@ class LabelTool:
         self.total = len(self.imageList)
 
         # set up output dir
-        self.outDir = os.path.join("./Labels")
         if not os.path.exists(self.outDir):
             os.mkdir(self.outDir)
 
-        self.yoloOutDir = os.path.join("./YoloLabels")
         if not os.path.exists(self.yoloOutDir):
             os.mkdir(self.yoloOutDir)
 
@@ -339,16 +336,85 @@ class LabelTool:
 
     # Custom method for getting index
     def get_index(self, value):
-        for key, label in labels.items():
+        for key, label in LABELS.items():
             if value == label:
                 return key
 
     def get_label_value(self, index):
         try:
-            return labels[index]
+            return LABELS[index]
         except:
             return None
 
+    def get_date(self):
+        today = datetime.today()
+        target_date = today - timedelta(days=DAYS_BACK)
+        formatted_date = target_date.strftime('%Y-%m-%d')
+        return formatted_date
+
+    def downloadImages(self):
+        if not os.path.exists(self.outDir):
+            os.mkdir(self.outDir)
+
+        loading_popup = Tk()
+        loading_popup.geometry("200x100")
+        loading_popup.title("Downloading Images...")
+
+        progress_label = Label(loading_popup, text="Downloading...")
+        progress_label.pack()
+
+        loading_popup.update_idletasks()
+
+    def download_helper(self, bucket, image_filename):
+        image_local_path = os.path.join(IMAGE_DIR, image_filename)
+
+        if os.path.exists(image_local_path):
+            print(f"{image_local_path} already exists")
+            return True
+        blob = storage.Blob(image_filename, bucket)
+
+        if blob.exists():
+            blob.download_to_filename(image_local_path)
+            return True
+        return False
+
+    def gcp_query_download(self):
+        db = firestore.Client()
+        storage_client = storage.Client()
+        bucket = storage_client.get_bucket(BUCKET_NAME)
+        sightings_ref = db.collection("sightings")
+
+        image_count = 0
+
+        query_date_from = self.get_date()
+        query = sightings_ref.where(filter=firestore.FieldFilter("date", ">=", query_date_from))
+        query = sightings_ref.where(filter=firestore.FieldFilter("is_processed_any_positive", "==", True))
+
+        # Check for is_labelled -> this will be set to true after the image has been labelled
+        query = sightings_ref.where(filter=firestore.FieldFilter("is_labelled", "!=", True))
+        if QUERY_THRESHOLD:
+            query = query.limit(QUERY_THRESHOLD)
+
+        sightings_docs = query.get()
+
+        for doc in sightings_docs:
+            try:
+                doc_data = doc.to_dict()
+                sighting_id = doc_data.get("sighting_id")
+                taken_on = doc_data.get("taken_on")
+                date = doc_data.get("date")
+                time = doc_data.get("time")
+
+                face_image_name = f"{sighting_id}_{taken_on}_{date}_{time}_FACE.jpg"
+                wscr_image_name = f"{sighting_id}_{taken_on}_{date}_{time}_WSCR.jpg"
+                # lp_image_name = f"{sighting_id}_{taken_on}_{date}_{time}_LP.jpg"
+
+                self.download_helper(bucket, face_image_name)
+                self.download_helper(bucket, wscr_image_name)
+
+            except Exception as e:
+                print(f"Error downloading images for sighting {sighting_id}, {e}")
+                continue
 
 if __name__ == "__main__":
     root = Tk()
